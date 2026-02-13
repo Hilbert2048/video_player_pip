@@ -6,17 +6,16 @@ publish_to: none
 
 environment:
   sdk: ^3.7.2
-  flutter: '>=3.3.0'
-   
+  flutter: ">=3.3.0"
 
 dependencies:
   flutter:
     sdk: flutter
   plugin_platform_interface: ^2.1.8
   video_player:
-    path: packages/video_player/video_player
+    any
+    # path: packages/video_player/video_player
 
-  
 dev_dependencies:
   flutter_test:
     sdk: flutter
