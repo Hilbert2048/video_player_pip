@@ -224,7 +224,6 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
   private func getKeyWindow() -> UIWindow? {
     if #available(iOS 13.0, *) {
       let scenes = UIApplication.shared.connectedScenes
-        .filter { $0.activationState == .foregroundActive }
         .compactMap { $0 as? UIWindowScene }
       
       NSLog("VideoPlayerPip: Found \(scenes.count) active window scenes")
