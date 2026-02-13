@@ -101,6 +101,22 @@ class VideoPlayerPip {
     return _onPipModeChangedController.stream;
   }
 
+  /// Stream of PiP restore requests.
+  ///
+  /// Emitted when the user taps the restore button on the PiP window.
+  /// After restoring the UI, call [notifyRestoreCompleted] to inform
+  /// the native layer that the restore is done.
+  Stream<void> get onPipRestoreRequested {
+    return _onPipRestoreRequestedController.stream;
+  }
+
+  /// Notifies the native layer that the UI restore is completed.
+  ///
+  /// Must be called after handling an [onPipRestoreRequested] event.
+  static Future<void> notifyRestoreCompleted() async {
+    await _channel.invokeMethod('restoreCompleted');
+  }
+
   /// Toggles Picture-in-Picture mode.
   ///
   /// If currently in PiP mode, it will exit. If not in PiP mode, it will
@@ -136,12 +152,16 @@ class VideoPlayerPip {
   }
 
   final _onPipModeChangedController = StreamController<bool>.broadcast();
+  final _onPipRestoreRequestedController = StreamController<void>.broadcast();
 
   Future<dynamic> _handleMethodCall(MethodCall call) async {
     switch (call.method) {
       case 'pipModeChanged':
         final bool isInPipMode = call.arguments['isInPipMode'] as bool;
         _onPipModeChangedController.add(isInPipMode);
+        break;
+      case 'pipRestoreRequested':
+        _onPipRestoreRequestedController.add(null);
         break;
       case 'pipError':
         final String errorMessage = call.arguments['error'] as String;
@@ -159,6 +179,9 @@ class VideoPlayerPip {
   void dispose() {
     if (!_onPipModeChangedController.isClosed) {
       _onPipModeChangedController.close();
+    }
+    if (!_onPipRestoreRequestedController.isClosed) {
+      _onPipRestoreRequestedController.close();
     }
     _channel.setMethodCallHandler(null);
   }

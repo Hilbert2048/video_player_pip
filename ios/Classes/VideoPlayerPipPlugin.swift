@@ -8,6 +8,7 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
   private var pipController: AVPictureInPictureController?
   private var isInPipMode = false
   private var observationToken: NSKeyValueObservation?
+  private var restoreCompletionHandler: ((Bool) -> Void)?
   
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "video_player_pip", binaryMessenger: registrar.messenger())
@@ -48,6 +49,12 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
     case "isInPipMode":
       NSLog("VideoPlayerPip: isInPipMode query = \(isInPipMode)")
       result(isInPipMode)
+      
+    case "restoreCompleted":
+      NSLog("VideoPlayerPip: Restore completed from Dart")
+      restoreCompletionHandler?(true)
+      restoreCompletionHandler = nil
+      result(true)
       
     default:
       NSLog("VideoPlayerPip: Method not implemented: \(call.method)")
@@ -340,6 +347,21 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
   
   public func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
     NSLog("VideoPlayerPip: PiP will stop")
+  }
+  
+  public func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+    NSLog("VideoPlayerPip: Restore UI requested")
+    restoreCompletionHandler = completionHandler
+    channel?.invokeMethod("pipRestoreRequested", arguments: nil)
+    
+    // Timeout protection: auto-complete if Dart doesn't respond within 5 seconds
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+      if let handler = self?.restoreCompletionHandler {
+        NSLog("VideoPlayerPip: Restore timeout, completing automatically")
+        handler(true)
+        self?.restoreCompletionHandler = nil
+      }
+    }
   }
   
   deinit {

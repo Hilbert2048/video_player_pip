@@ -1,0 +1,225 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "video_player_pip",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "video_player_pip (profile mode)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "video_player_pip (release mode)",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "example",
+            "cwd": "example",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "example (profile mode)",
+            "cwd": "example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "example (release mode)",
+            "cwd": "example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "video_player",
+            "cwd": "packages/video_player/video_player",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "video_player (profile mode)",
+            "cwd": "packages/video_player/video_player",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "video_player (release mode)",
+            "cwd": "packages/video_player/video_player",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "video_player_android",
+            "cwd": "packages/video_player/video_player_android",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "video_player_android (profile mode)",
+            "cwd": "packages/video_player/video_player_android",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "video_player_android (release mode)",
+            "cwd": "packages/video_player/video_player_android",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "video_player_avfoundation",
+            "cwd": "packages/video_player/video_player_avfoundation",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "video_player_avfoundation (profile mode)",
+            "cwd": "packages/video_player/video_player_avfoundation",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "video_player_avfoundation (release mode)",
+            "cwd": "packages/video_player/video_player_avfoundation",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "video_player_platform_interface",
+            "cwd": "packages/video_player/video_player_platform_interface",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "video_player_platform_interface (profile mode)",
+            "cwd": "packages/video_player/video_player_platform_interface",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "video_player_platform_interface (release mode)",
+            "cwd": "packages/video_player/video_player_platform_interface",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "video_player_web",
+            "cwd": "packages/video_player/video_player_web",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "video_player_web (profile mode)",
+            "cwd": "packages/video_player/video_player_web",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "video_player_web (release mode)",
+            "cwd": "packages/video_player/video_player_web",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "example",
+            "cwd": "packages/video_player/video_player/example",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "example (profile mode)",
+            "cwd": "packages/video_player/video_player/example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "example (release mode)",
+            "cwd": "packages/video_player/video_player/example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "example",
+            "cwd": "packages/video_player/video_player_android/example",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "example (profile mode)",
+            "cwd": "packages/video_player/video_player_android/example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "example (release mode)",
+            "cwd": "packages/video_player/video_player_android/example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "example",
+            "cwd": "packages/video_player/video_player_avfoundation/example",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "example (profile mode)",
+            "cwd": "packages/video_player/video_player_avfoundation/example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "example (release mode)",
+            "cwd": "packages/video_player/video_player_avfoundation/example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        },
+        {
+            "name": "example",
+            "cwd": "packages/video_player/video_player_web/example",
+            "request": "launch",
+            "type": "dart"
+        },
+        {
+            "name": "example (profile mode)",
+            "cwd": "packages/video_player/video_player_web/example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "example (release mode)",
+            "cwd": "packages/video_player/video_player_web/example",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release"
+        }
+    ]
+}
