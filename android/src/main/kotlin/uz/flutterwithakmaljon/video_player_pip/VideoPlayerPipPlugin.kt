@@ -473,9 +473,10 @@ class VideoPlayerPipPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
   
   private fun notifyPipModeChanged() {
     try {
-      Log.d(TAG, "Notifying Flutter of PiP mode change: $isInPipMode")
+      Log.d(TAG, "Notifying Flutter of PiP mode change: $isInPipMode, playerId: $activePlayerId")
       channel.invokeMethod("pipModeChanged", mapOf(
-          "isInPipMode" to isInPipMode
+          "isInPipMode" to isInPipMode,
+          "playerId" to activePlayerId
       ))
     } catch (e: Exception) {
       Log.e(TAG, "Error notifying PiP mode change", e)

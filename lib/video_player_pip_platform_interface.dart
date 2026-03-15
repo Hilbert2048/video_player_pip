@@ -28,6 +28,16 @@ abstract class VideoPlayerPipPlatform extends PlatformInterface {
     throw UnimplementedError('isPipSupported() has not been implemented.');
   }
 
+  /// Pre-initializes the PiP controller for automatic entry.
+  Future<bool> enableAutoPip(int playerId) {
+    throw UnimplementedError('enableAutoPip() has not been implemented.');
+  }
+
+  /// Cleans up the pre-initialized PiP controller.
+  Future<bool> disableAutoPip([int? playerId]) {
+    throw UnimplementedError('disableAutoPip() has not been implemented.');
+  }
+
   /// Enters PiP mode for the specified player ID.
   Future<bool> enterPipMode(int playerId, {int? width, int? height}) {
     throw UnimplementedError('enterPipMode() has not been implemented.');

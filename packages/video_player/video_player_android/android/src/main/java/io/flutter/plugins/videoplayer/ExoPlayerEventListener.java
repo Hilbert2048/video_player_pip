@@ -7,7 +7,10 @@ package io.flutter.plugins.videoplayer;
 import androidx.annotation.NonNull;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
+import java.util.HashMap;
+import java.util.Map;
 
 public abstract class ExoPlayerEventListener implements Player.Listener {
   private boolean isBuffering = false;
@@ -96,8 +99,52 @@ public abstract class ExoPlayerEventListener implements Player.Listener {
       exoPlayer.seekToDefaultPosition();
       exoPlayer.prepare();
     } else {
-      events.onError("VideoError", "Video player had error " + error, null);
+      Integer httpStatus = findHttpStatus(error);
+      String message = buildMessage(error);
+      Throwable root = getDeepestCause(error);
+      String reasonCode = PlaybackException.getErrorCodeName(error.errorCode);
+      Map<String, Object> details = new HashMap<>();
+      details.put("platform", "android");
+      details.put("reasonCode", reasonCode);
+      details.put("reasonMessage", message);
+      details.put("nativeCode", error.errorCode);
+      details.put("nativeDomain", "ExoPlayer");
+      details.put("exceptionClass", root.getClass().getName());
+      if (httpStatus != null) {
+        details.put("httpStatus", httpStatus);
+      }
+      events.onError("VideoError", message, details);
     }
+  }
+
+  private static String buildMessage(@NonNull PlaybackException error) {
+    Throwable root = getDeepestCause(error);
+    String rootMessage = root != null ? root.getMessage() : null;
+    return
+        (rootMessage != null && !rootMessage.isEmpty())
+            ? rootMessage
+            : (error.getMessage() != null ? error.getMessage() : "Video player had error");
+  }
+
+  private static Throwable getDeepestCause(@NonNull Throwable error) {
+    Throwable cursor = error;
+    Throwable next = cursor.getCause();
+    while (next != null) {
+      cursor = next;
+      next = cursor.getCause();
+    }
+    return cursor;
+  }
+
+  private static Integer findHttpStatus(@NonNull Throwable error) {
+    Throwable cursor = error;
+    while (cursor != null) {
+      if (cursor instanceof HttpDataSource.InvalidResponseCodeException) {
+        return ((HttpDataSource.InvalidResponseCodeException) cursor).responseCode;
+      }
+      cursor = cursor.getCause();
+    }
+    return null;
   }
 
   @Override

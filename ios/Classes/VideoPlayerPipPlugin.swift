@@ -5,12 +5,24 @@ import AVKit
 
 public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureControllerDelegate {
   private var channel: FlutterMethodChannel?
-  private var pipController: AVPictureInPictureController?
+  
+  // Cache controllers by playerId
+  private var pipControllers: [Int: AVPictureInPictureController] = [:]
+  
+  // Map of observation tokens per playerId
+  private var observationTokens: [Int: NSKeyValueObservation] = [:]
+  
   private var isInPipMode = false
-  private var observationToken: NSKeyValueObservation?
   private var restoreCompletionHandler: ((Bool) -> Void)?
   
+  // Track the most recently active PiP player ID
+  private var activePipPlayerId: Int?
+  
+  // Keep a weak reference to the registrar to access other plugins
+  private static var registrar: FlutterPluginRegistrar?
+  
   public static func register(with registrar: FlutterPluginRegistrar) {
+    self.registrar = registrar
     let channel = FlutterMethodChannel(name: "video_player_pip", binaryMessenger: registrar.messenger())
     let instance = VideoPlayerPipPlugin(channel: channel)
     registrar.addMethodCallDelegate(instance, channel: channel)
@@ -31,6 +43,28 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
       NSLog("VideoPlayerPip: isPipSupported = \(supported)")
       result(supported)
       
+    case "enableAutoPip":
+      guard let args = call.arguments as? [String: Any],
+            let playerId = args["playerId"] as? Int else {
+        NSLog("VideoPlayerPip: enableAutoPip failed - Invalid arguments")
+        result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing playerId", details: nil))
+        return
+      }
+      NSLog("VideoPlayerPip: Enabling auto PiP for playerId: \(playerId)")
+      // Use retry mechanism to wait for the view to be composited
+      enableAutoPipWithRetry(playerId: playerId, attempt: 0, maxAttempts: 10, completion: result)
+      
+    case "disableAutoPip":
+      guard let args = call.arguments as? [String: Any],
+            let playerId = args["playerId"] as? Int else {
+          NSLog("VideoPlayerPip: disableAutoPip failed - Missing playerId")
+          result(true)
+          return
+      }
+      NSLog("VideoPlayerPip: Disabling auto PiP for playerId: \(playerId)")
+      disableAutoPip(playerId: playerId)
+      result(true)
+      
     case "enterPipMode":
       guard let args = call.arguments as? [String: Any],
             let playerId = args["playerId"] as? Int else {
@@ -43,7 +77,7 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
       enterPipMode(playerId: playerId, completion: result)
       
     case "exitPipMode":
-      NSLog("VideoPlayerPip: Attempting to exit PiP mode, current isInPipMode = \(isInPipMode), pipController exists: \(pipController != nil)")
+      NSLog("VideoPlayerPip: Attempting to exit PiP mode")
       exitPipMode(completion: result)
       
     case "isInPipMode":
@@ -72,6 +106,94 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
     return false
   }
   
+  /// Pre-initializes the PiP controller so the system can automatically trigger PiP
+  /// when the user backgrounds the app. Does NOT call startPictureInPicture().
+  private func enableAutoPipWithRetry(playerId: Int, attempt: Int, maxAttempts: Int, completion: @escaping FlutterResult) {
+     if !isPipSupported() {
+       NSLog("VideoPlayerPip: PiP not supported by the device")
+       completion(false)
+       return
+     }
+
+     if let playerLayer = findAVPlayerLayer(playerId: playerId) {
+       NSLog("VideoPlayerPip: Found AVPlayerLayer on attempt \(attempt + 1)")
+       setupAutoPipController(playerLayer: playerLayer, playerId: playerId, completion: completion)
+       return
+     }
+
+     if attempt < maxAttempts {
+       let delay = 0.1 * Double(attempt + 1)
+       DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+           self?.enableAutoPipWithRetry(playerId: playerId, attempt: attempt + 1, maxAttempts: maxAttempts, completion: completion)
+       }
+     } else {
+       NSLog("VideoPlayerPip: Could not find AVPlayerLayer after \(maxAttempts) attempts")
+       completion(false)
+     }
+  }
+
+  private func setupAutoPipController(playerLayer: AVPlayerLayer, playerId: Int, completion: @escaping FlutterResult) {
+     NSLog("VideoPlayerPip: Setting up auto PiP controller with layer: \(playerLayer) for playerId: \(playerId)")
+     
+     if #available(iOS 14.0, *) {
+       if AVPictureInPictureController.isPictureInPictureSupported() && playerLayer.player != nil {
+         
+         // Create new controller
+         let controller = AVPictureInPictureController(playerLayer: playerLayer)
+         controller?.delegate = self
+         
+         if #available(iOS 14.2, *) {
+           // Ensure only this new controller has auto-pip enabled
+           for (pid, otherController) in self.pipControllers {
+               if pid != playerId {
+                   otherController.canStartPictureInPictureAutomaticallyFromInline = false
+               }
+           }
+           NSLog("VideoPlayerPip: Setting canStartPictureInPictureAutomaticallyFromInline = true for playerId: \(playerId)")
+           controller?.canStartPictureInPictureAutomaticallyFromInline = true
+         }
+         
+         if #available(iOS 15.0, *) {
+           controller?.requiresLinearPlayback = false
+         }
+         
+         // Store in map
+         if let validController = controller {
+             pipControllers[playerId] = validController
+             
+             // Set up observation
+             let token = validController.observe(\.isPictureInPictureActive, options: [.new]) { [weak self] (controller, change) in
+               guard let self = self, let newValue = change.newValue else { return }
+               NSLog("VideoPlayerPip: isPictureInPictureActive changed to \(newValue) for playerId: \(playerId)")
+               
+               if newValue {
+                   self.activePipPlayerId = playerId
+                   self.isInPipMode = true
+               } else {
+                   if self.activePipPlayerId == playerId {
+                       self.isInPipMode = false
+                   }
+               }
+               
+               self.channel?.invokeMethod("pipModeChanged", arguments: [
+                   "isInPipMode": newValue,
+                   "playerId": playerId
+               ])
+             }
+             observationTokens[playerId] = token
+         }
+         
+         NSLog("VideoPlayerPip: Auto PiP controller created successfully for playerId: \(playerId)")
+         completion(true)
+       } else {
+         NSLog("VideoPlayerPip: Cannot create PiP controller (supported: \(AVPictureInPictureController.isPictureInPictureSupported()), player: \(playerLayer.player != nil))")
+         completion(false)
+       }
+     } else {
+       completion(false)
+     }
+  }
+
   private func enterPipMode(playerId: Int, completion: @escaping FlutterResult) {
     NSLog("VideoPlayerPip: enterPipMode called for playerId: \(playerId)")
     if !isPipSupported() {
@@ -80,8 +202,26 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
       return
     }
     
-    // Find the AVPlayerLayer
-    NSLog("VideoPlayerPip: Searching for AVPlayerLayer for playerId: \(playerId)")
+    // Check cache first
+    if let controller = pipControllers[playerId] {
+        NSLog("VideoPlayerPip: Starting PiP from cached controller for \(playerId)")
+        
+        if !controller.isPictureInPictureActive {
+             if !controller.isPictureInPicturePossible {
+                 // Common reasons for not possible:
+                 // 1. Video view not in window hierarchy
+                 // 2. Video is not playing / paused
+                 // 3. System hasn't acknowledged the layer yet
+             }
+            controller.startPictureInPicture()
+        }
+        completion(true)
+        return
+    }
+    
+    // No existing controller, create one from scratch
+    NSLog("VideoPlayerPip: No existing controller, searching for AVPlayerLayer for playerId: \(playerId)")
+    
     guard let playerLayer = findAVPlayerLayer(playerId: playerId) else {
       NSLog("VideoPlayerPip: Could not find player layer for ID: \(playerId)")
       completion(false)
@@ -90,19 +230,32 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
     
     NSLog("VideoPlayerPip: Found AVPlayerLayer: \(playerLayer)")
     
-    // Check if player is ready
     if let player = playerLayer.player {
-      NSLog("VideoPlayerPip: Player status: \(player.status.rawValue), currentItem: \(player.currentItem != nil ? "exists" : "nil"), error: \(player.error?.localizedDescription ?? "none")")
-      
-      // Ensure the player is playing
       if player.timeControlStatus != .playing {
-        NSLog("VideoPlayerPip: Player is not currently playing, trying to play")
         player.play()
       }
       
-      // Wait a moment to ensure player is properly prepared
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-        self?.continueEnterPipMode(playerLayer: playerLayer, completion: completion)
+      // Use setupAutoPipController to create and configure the controller
+      setupAutoPipController(playerLayer: playerLayer, playerId: playerId) { [weak self] success in
+          if let success = success as? Bool, success {
+              if let controller = self?.pipControllers[playerId] {
+                  NSLog("VideoPlayerPip: Starting newly created PiP controller")
+                  if #available(iOS 15.0, *) {
+                      controller.startPictureInPicture()
+                      // Retry logic for iOS 15+ if needed
+                      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak controller] in
+                          if let c = controller, !c.isPictureInPictureActive {
+                              c.startPictureInPicture()
+                          }
+                      }
+                  } else {
+                      controller.startPictureInPicture()
+                  }
+              }
+              completion(true)
+          } else {
+              completion(false)
+          }
       }
     } else {
       NSLog("VideoPlayerPip: AVPlayerLayer has no player set")
@@ -110,96 +263,73 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
     }
   }
   
-  private func continueEnterPipMode(playerLayer: AVPlayerLayer, completion: @escaping FlutterResult) {
-    // Create and configure the PiP controller
-    if #available(iOS 14.0, *) {
-      NSLog("VideoPlayerPip: Creating AVPictureInPictureController with playerLayer")
-      
-      // Check if we can create a PiP controller with this layer
-      if AVPictureInPictureController.isPictureInPictureSupported() && playerLayer.player != nil {
-        // Clean up any existing controller and observations
-        cleanupPipController()
-        
-        pipController = AVPictureInPictureController(playerLayer: playerLayer)
-        pipController?.delegate = self
-        
-        // Enable PiP to start from inline (foreground)
+  private func disableAutoPip(playerId: Int) {
+    if let controller = pipControllers[playerId] {
         if #available(iOS 14.2, *) {
-          NSLog("VideoPlayerPip: Setting canStartPictureInPictureAutomaticallyFromInline to true")
-          pipController?.canStartPictureInPictureAutomaticallyFromInline = true
+          controller.canStartPictureInPictureAutomaticallyFromInline = false
         }
         
-        // Allow PiP during interactive playback
-        if #available(iOS 15.0, *) {
-          NSLog("VideoPlayerPip: Setting requiresLinearPlayback to false")
-          pipController?.requiresLinearPlayback = false
+        if let token = observationTokens[playerId] {
+            token.invalidate()
+            observationTokens.removeValue(forKey: playerId)
         }
-        
-        NSLog("VideoPlayerPip: PiP controller created successfully: \(String(describing: pipController))")
-        
-        // Set up observation for the possible PiP state
-        if #available(iOS 14.0, *) {
-          observationToken = pipController?.observe(\.isPictureInPictureActive, options: [.new]) { [weak self] (controller, change) in
-            guard let self = self, let newValue = change.newValue else { return }
-            NSLog("VideoPlayerPip: isPictureInPictureActive changed to \(newValue)")
-            self.isInPipMode = newValue
-            self.channel?.invokeMethod("pipModeChanged", arguments: ["isInPipMode": newValue])
-          }
-        }
-        
-        // Start PiP - Try to start it more forcefully
-        NSLog("VideoPlayerPip: Attempting to start PiP")
-        
-        if #available(iOS 15.0, *) {
-          // On iOS 15+, we can try a slightly more direct approach
-          pipController?.startPictureInPicture()
-          
-          // Also try after a short delay as a fallback
-          DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self, !(self.pipController?.isPictureInPictureActive ?? false) else { return }
-            NSLog("VideoPlayerPip: Trying to start PiP again after delay (iOS 15+)")
-            self.pipController?.startPictureInPicture()
-          }
-          
-        } else {
-          // On iOS 14, just use the regular API
-          pipController?.startPictureInPicture()
-        }
-        
-        completion(true)
-      } else {
-        NSLog("VideoPlayerPip: Cannot create PiP controller - either not supported or player is nil")
-        completion(false)
-      }
-    } else {
-      NSLog("VideoPlayerPip: iOS version < 14.0, cannot create PiP controller")
-      completion(false)
+        pipControllers.removeValue(forKey: playerId)
+        NSLog("VideoPlayerPip: Removed controller for playerId: \(playerId)")
     }
   }
-  
-  private func cleanupPipController() {
-    observationToken?.invalidate()
-    observationToken = nil
-    
-    if isInPipMode && pipController != nil {
-      pipController?.stopPictureInPicture()
-    }
-    
-    pipController = nil
+
+  private func cleanupPipController(playerId: Int? = nil) {
+      if let id = playerId {
+          // Clean specific
+          if let token = observationTokens[id] {
+              token.invalidate()
+              observationTokens.removeValue(forKey: id)
+          }
+          pipControllers.removeValue(forKey: id)
+      } else {
+          // Clean all (e.g. on deinit)
+          for (_, token) in observationTokens {
+              token.invalidate()
+          }
+          observationTokens.removeAll()
+          // Stop any active PiP
+          for (_, controller) in pipControllers {
+              if controller.isPictureInPictureActive {
+                  controller.stopPictureInPicture()
+              }
+          }
+          pipControllers.removeAll()
+          activePipPlayerId = nil
+      }
   }
   
   private func exitPipMode(completion: @escaping FlutterResult) {
-    NSLog("VideoPlayerPip: exitPipMode called, isInPipMode: \(isInPipMode), pipController: \(String(describing: pipController))")
-    if isInPipMode, pipController != nil {
-      NSLog("VideoPlayerPip: Stopping picture-in-picture")
-      pipController?.stopPictureInPicture()
-      completion(true)
-    } else {
-      NSLog("VideoPlayerPip: Cannot stop PiP - either not in PiP mode or controller is nil")
-      completion(false)
-    }
+      // Stop whichever is active
+      if let activeId = activePipPlayerId, let controller = pipControllers[activeId] {
+          NSLog("VideoPlayerPip: Stopping active PiP controller for \(activeId)")
+          controller.stopPictureInPicture()
+          completion(true)
+      } else {
+          NSLog("VideoPlayerPip: No active PiP ID found, sweeping all...")
+          // Fallback: iterate all?
+          var stoppedAny = false
+          for (_, controller) in pipControllers {
+              if controller.isPictureInPictureActive {
+                  controller.stopPictureInPicture()
+                  stoppedAny = true
+              }
+          }
+          if !stoppedAny {
+               NSLog("VideoPlayerPip: No active PiP controller to stop")
+          }
+          completion(true)
+      }
   }
   
+  /**
+   * Find the AVPlayerLayer for the specified player ID.
+   * This searches through the view hierarchy to find the platform view created by video_player.
+   */
   /**
    * Find the AVPlayerLayer for the specified player ID.
    * This searches through the view hierarchy to find the platform view created by video_player.
@@ -209,12 +339,51 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
     // Use a more modern approach to get the active window
     let keyWindow = getKeyWindow()
     NSLog("VideoPlayerPip: keyWindow found: \(keyWindow != nil)")
-    if let rootViewController = keyWindow?.rootViewController {
-      NSLog("VideoPlayerPip: Starting search from rootViewController: \(type(of: rootViewController))")
-      // Start with the root view and search recursively
-      return findAVPlayerLayerInView(rootViewController.view, depth: 0)
+    
+    guard let rootViewController = keyWindow?.rootViewController else {
+        NSLog("VideoPlayerPip: No rootViewController found")
+        return nil
     }
-    NSLog("VideoPlayerPip: No rootViewController found")
+    
+    NSLog("VideoPlayerPip: Starting search from rootViewController: \(type(of: rootViewController))")
+    
+    // Collect ALL candidate layers
+    var candidates: [AVPlayerLayer] = []
+    collectAVPlayerLayers(view: rootViewController.view, depth: 0, into: &candidates)
+    
+    NSLog("VideoPlayerPip: Found \(candidates.count) candidate AVPlayerLayers")
+    
+    // Filter for the best candidate
+    // Criteria:
+    // 1. Must have a player
+    // 2. Player should be playing (rate > 0)
+    // 3. (Optional) View should be visible/in-bounds?
+    // Since we know the user is trying to PiP the *active* video, prioritizing the playing one is safest.
+    
+    var bestLayer: AVPlayerLayer?
+    
+    for layer in candidates {
+        if let player = layer.player {
+            let isPlaying = player.rate > 0
+            
+            if isPlaying {
+                // Strong signal: this is the active video
+                bestLayer = layer
+                break // Found the playing video!
+            }
+            
+            // Fallback: keep the last one found if none are playing (e.g. paused)
+            if bestLayer == nil {
+                bestLayer = layer
+            }
+        }
+    }
+    
+    if let best = bestLayer {
+        NSLog("VideoPlayerPip: Selected best layer: \(best)")
+        return best
+    }
+    
     return nil
   }
   
@@ -224,6 +393,7 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
   private func getKeyWindow() -> UIWindow? {
     if #available(iOS 13.0, *) {
       let scenes = UIApplication.shared.connectedScenes
+        .filter { $0.activationState == .foregroundActive }
         .compactMap { $0 as? UIWindowScene }
       
       NSLog("VideoPlayerPip: Found \(scenes.count) active window scenes")
@@ -242,101 +412,37 @@ public class VideoPlayerPipPlugin: NSObject, FlutterPlugin, AVPictureInPictureCo
   }
   
   /**
-   * Recursively search for an AVPlayerLayer in the view hierarchy.
+   * Recursively collect all AVPlayerLayers in the view hierarchy.
    */
-  private func findAVPlayerLayerInView(_ view: UIView, depth: Int) -> AVPlayerLayer? {
-    let indentation = String(repeating: "  ", count: depth)
-    let className = NSStringFromClass(type(of: view))
-    NSLog("\(indentation)VideoPlayerPip: Checking view: \(className)")
-    
-    // Check if this view's layer is an AVPlayerLayer
+  private func collectAVPlayerLayers(view: UIView, depth: Int, into candidates: inout [AVPlayerLayer]) {
+    // Check if this view's backing layer is an AVPlayerLayer (e.g. FVPPlayerView)
     if let playerLayer = view.layer as? AVPlayerLayer {
-      NSLog("\(indentation)VideoPlayerPip: Found AVPlayerLayer directly as view's layer")
-      // Check if the player is set
-      if let player = playerLayer.player {
-        NSLog("\(indentation)VideoPlayerPip: AVPlayerLayer has player: \(player)")
-        return playerLayer
-      } else {
-        NSLog("\(indentation)VideoPlayerPip: AVPlayerLayer has no player set")
+      if playerLayer.player != nil && !candidates.contains(playerLayer) {
+          candidates.append(playerLayer)
       }
     }
     
-    // Check for class name matching FVPPlayerView which has an AVPlayerLayer as its layer
-    if className.contains("FVPPlayerView") {
-      NSLog("\(indentation)VideoPlayerPip: Found FVPPlayerView")
-      if let playerLayer = view.layer as? AVPlayerLayer {
-        NSLog("\(indentation)VideoPlayerPip: FVPPlayerView's layer is AVPlayerLayer")
-        if let player = playerLayer.player {
-          NSLog("\(indentation)VideoPlayerPip: FVPPlayerView's AVPlayerLayer has player: \(player)")
-        } else {
-          NSLog("\(indentation)VideoPlayerPip: FVPPlayerView's AVPlayerLayer has no player set")
-        }
-        return playerLayer
-      } else {
-        NSLog("\(indentation)VideoPlayerPip: FVPPlayerView's layer is not AVPlayerLayer: \(type(of: view.layer))")
-      }
-    }
-    
-    // Check sublayers directly in case AVPlayerLayer is a sublayer
+    // Check sublayers directly
+    // Some implementations add the AVPlayerLayer as a sublayer instead of the backing layer
     if let sublayers = view.layer.sublayers {
-      NSLog("\(indentation)VideoPlayerPip: Checking \(sublayers.count) sublayers")
       for sublayer in sublayers {
         if let playerLayer = sublayer as? AVPlayerLayer {
-          NSLog("\(indentation)VideoPlayerPip: Found AVPlayerLayer as a sublayer")
-          if let player = playerLayer.player {
-            NSLog("\(indentation)VideoPlayerPip: Sublayer AVPlayerLayer has player: \(player)")
-            return playerLayer
-          } else {
-            NSLog("\(indentation)VideoPlayerPip: Sublayer AVPlayerLayer has no player set")
+          if playerLayer.player != nil && !candidates.contains(playerLayer) {
+            candidates.append(playerLayer)
           }
         }
       }
     }
     
     // Recursively check subviews
-    NSLog("\(indentation)VideoPlayerPip: Checking \(view.subviews.count) subviews")
     for subview in view.subviews {
-      if let layer = findAVPlayerLayerInView(subview, depth: depth + 1) {
-        return layer
-      }
-    }
-    
-    return nil
-  }
-  
-  // MARK: - AVPictureInPictureControllerDelegate
-  
-  public func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-    NSLog("VideoPlayerPip: PiP started successfully")
-    isInPipMode = true
-    channel?.invokeMethod("pipModeChanged", arguments: ["isInPipMode": true])
-  }
-  
-  public func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-    NSLog("VideoPlayerPip: PiP stopped")
-    isInPipMode = false
-    channel?.invokeMethod("pipModeChanged", arguments: ["isInPipMode": false])
-    // Explicitly release the controller when PiP is stopped
-    if #available(iOS 14.0, *) {
-        if self.pipController == pictureInPictureController {
-            NSLog("VideoPlayerPip: Releasing pipController reference")
-            self.pipController = nil
-        } else {
-            NSLog("VideoPlayerPip: Stopped PiP controller doesn't match current pipController")
-        }
-    } else {
-        if self.pipController === pictureInPictureController {
-            NSLog("VideoPlayerPip: Releasing pipController reference (using identity check)")
-            self.pipController = nil
-        } else {
-            NSLog("VideoPlayerPip: Stopped PiP controller doesn't match current pipController (using identity check)")
-        }
+      collectAVPlayerLayers(view: subview, depth: depth + 1, into: &candidates)
     }
   }
-  
+
   public func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
-    NSLog("VideoPlayerPip: Failed to start PiP: \(error.localizedDescription)")
-    NSLog("VideoPlayerPip: Error details: \(error)")
+    let nsError = error as NSError
+    NSLog("VideoPlayerPip: Failed to start PiP. Error Domain: \(nsError.domain), Code: \(nsError.code), Description: \(nsError.localizedDescription)")
     channel?.invokeMethod("pipError", arguments: ["error": error.localizedDescription])
   }
   

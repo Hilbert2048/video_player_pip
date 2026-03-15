@@ -12,12 +12,35 @@ class MethodChannelVideoPlayerPip extends VideoPlayerPipPlatform {
   @override
   Future<bool> isPipSupported() async {
     try {
-      final isSupported = await methodChannel.invokeMethod<bool>(
-        'isPipSupported',
-      );
+      final isSupported = await methodChannel.invokeMethod<bool>('isPipSupported');
       return isSupported ?? false;
     } on PlatformException catch (e) {
       debugPrint('Error checking PiP support: ${e.message}');
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> enableAutoPip(int playerId) async {
+    try {
+      final result = await methodChannel.invokeMethod<bool>('enableAutoPip', {'playerId': playerId});
+      return result ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('Error enabling auto PiP: ${e.message}');
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> disableAutoPip([int? playerId]) async {
+    try {
+      final result = await methodChannel.invokeMethod<bool>(
+        'disableAutoPip',
+        playerId != null ? {'playerId': playerId} : null,
+      );
+      return result ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('Error disabling auto PiP: ${e.message}');
       return false;
     }
   }
